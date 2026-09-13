@@ -80,10 +80,10 @@ HTML
       border: 1px solid #ddd;
       border-radius: 8px;
       padding: 10px;
-      height: 160px;
+      height: 180px;
       overflow-y: auto;
       text-align: left;
-      font-size: 14px;
+      font-size: 13px;
       color: #333;
       white-space: pre-wrap;
     }
@@ -239,12 +239,12 @@ HTML
           return;
         }
         isTalkingWithAI = true;
-        chatHistory = []; // 会話履歴をリセット
+        chatHistory = []; // 新しい会話セッションを開始
         btn.innerText = "🛑 おしゃべりを終了する";
         btn.style.background = "#d32f2f";
-        log("💬 会話をスタートしました...");
+        log("💬 会答セッションを開始しました");
 
-        speak("こんにちは！今日はお話しできて嬉しいです。何か気になっていることや、お話ししたいことはありますか？", () => {
+        speak("こんにちは！今日はお話しできて嬉しいです。今日はどんな一日でしたか？", () => {
           continueAILoop();
         });
       } else {
@@ -258,19 +258,19 @@ HTML
       const btn = document.getElementById('chat-btn');
       btn.innerText = "💬 AIとおしゃべりを開始";
       btn.style.background = "#2e7d32";
-      log("⏹️ 会話を終了しました。");
+      log("⏹️ おしゃべりを終了しました。");
     }
 
     function continueAILoop() {
       if (!isTalkingWithAI) return;
 
-      log("👂 声を聞き取っています...");
+      log("👂 マイク準備中…お話しください");
       listenOnce(async (userText) => {
         if (!isTalkingWithAI) return;
 
         if (!userText || userText === "（聞き取れませんでした）") {
-          speak("少し声が届きにくかったみたいです。もう一度お話しいただけますか？", () => {
-            if (isTalkingWithAI) setTimeout(continueAILoop, 800);
+          speak("すみません、よく聞き取れませんでした。もう一度短めにお話しいただけますか？", () => {
+            if (isTalkingWithAI) setTimeout(continueAILoop, 1000);
           });
           return;
         }
@@ -278,7 +278,7 @@ HTML
         log(`[ご本人]: ${userText}`);
 
         if (userText.includes("おしまい") || userText.includes("バイバイ") || userText.includes("終了") || userText.includes("ありがとう")) {
-          speak("お話しできて本当に良かったです。またいつでも声をかけてくださいね！", () => {
+          speak("お話しできて楽しかったです！またいつでも声をかけてくださいね。", () => {
             stopAIConversation();
           });
           return;
@@ -286,13 +286,13 @@ HTML
 
         const aiReply = await askGeminiChat(userText);
         speak(aiReply, () => {
-          if (isTalkingWithAI) setTimeout(continueAILoop, 600);
+          if (isTalkingWithAI) setTimeout(continueAILoop, 800);
         });
       });
     }
 
     async function askGeminiChat(userText) {
-      // ユーザーの発言を会話履歴に追加
+      // ユーザー発言をコンテキストに追加
       chatHistory.push({ role: "user", parts: [{ text: userText }] });
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
@@ -302,12 +302,12 @@ HTML
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            // システムプロンプトを独立した設定として送信
             systemInstruction: {
               parts: [{
-                text: "あなたは優しく丁寧な高齢者向け聞き上手AIアシスタントです。" +
-                      "ユーザーの発言内容にしっかり耳を傾け、話の内容に具体的に反応してください。" +
-                      "定型文を返さず、毎回新しく自然な相槌やコメントを2〜3文で作成し、最後に答えやすい質問を1つ含めてください。"
+                text: "あなたは高齢者のお話し相手となる親切な近所の話し相手です。" +
+                      "直前のユーザーの発言内容にしっかりと耳を傾け、相手の発言に含まれるキーワード（天気、ご飯、家族、健康など）に直接コメントしてください。" +
+                      "オウム返しや汎用的な挨拶だけで終わらせず、具体的に共感し、最後に相手が答えやすい簡単な質問を1つだけ投げかけてください。" +
+                      "文字数は60文字〜90文字程度で、短く分かりやすい日本語で話してください。"
               }]
             },
             contents: chatHistory
@@ -318,22 +318,21 @@ HTML
         
         if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0].text) {
           const aiReply = data.candidates[0].content.parts[0].text;
-          // AIの返答を会話履歴に追加
           chatHistory.push({ role: "model", parts: [{ text: aiReply }] });
           return aiReply;
         } else {
-          console.error("API Response Error:", data);
-          return "なるほど、そうなんですね。もう少し詳しく教えていただけますか？";
+          console.error("Gemini Error Response:", data);
+          return `「${userText}」とおっしゃったのですね。もう少し詳しく教えていただけますか？`;
         }
       } catch (err) {
-        console.error("Fetch Error:", err);
-        return "通信の影響でうまく聞き取れませんでしたが、もう一度お聞きしてもよろしいですか？";
+        console.error("API Fetch Error:", err);
+        return "申し訳ありません。うまく通信できませんでした。もう一度お願いできますか？";
       }
     }
 
     function listenOnce(callback) {
       if (!SpeechRecognition) {
-        alert("お使いのブラウザは音声認識に対応していません（ChromeまたはSafari推奨）。");
+        alert("お使いのブラウザは音声認識に対応していません。");
         return;
       }
 
@@ -342,12 +341,19 @@ HTML
       rec.interimResults = false;
       rec.maxAlternatives = 1;
 
+      // 認識タイムアウト防止
+      let hasResponded = false;
+
       rec.onresult = (e) => {
+        if (hasResponded) return;
+        hasResponded = true;
         const text = e.results[0][0].transcript;
         callback(text);
       };
 
       rec.onerror = (e) => {
+        if (hasResponded) return;
+        hasResponded = true;
         console.log("Speech Rec Error:", e);
         callback("（聞き取れませんでした）");
       };
@@ -355,8 +361,10 @@ HTML
       try {
         rec.start();
       } catch (e) {
-        console.error(e);
-        callback("（聞き取れませんでした）");
+        if (!hasResponded) {
+          hasResponded = true;
+          callback("（聞き取れませんでした）");
+        }
       }
     }
 
