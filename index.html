@@ -66,35 +66,38 @@ HTML
     .btn-main { background: var(--primary); color: white; }
     .btn-check { background: #0288d1; color: white; }
     .btn-alert { background: var(--warning); color: white; }
+    .btn-recording { background: #ff9800; color: white; animation: pulse 1.5s infinite; }
     .btn-secondary { background: #e0e0e0; color: #333; }
     .btn-small { padding: 8px; font-size: 14px; width: 40%; margin-top: 0; }
+
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
 
     #log-box {
       background: #fafafa;
       border: 1px solid #ddd;
       border-radius: 8px;
       padding: 10px;
-      height: 160px;
+      height: 140px;
       overflow-y: auto;
       text-align: left;
       font-size: 14px;
       color: #555;
     }
 
-    .alert-overlay {
+    #audio-player-container {
+      margin-top: 10px;
       display: none;
-      position: fixed;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(211, 47, 47, 0.95);
-      color: white;
-      z-index: 1000;
       flex-direction: column;
-      justify-content: center;
       align-items: center;
-      padding: 20px;
-      box-sizing: border-box;
-      text-align: center;
+      background: #fff3e0;
+      padding: 10px;
+      border-radius: 8px;
     }
+    audio { width: 100%; margin-top: 5px; }
   </style>
 </head>
 <body>
@@ -120,7 +123,14 @@ HTML
     <h2>本日のアクション</h2>
     <button class="btn-main" onclick="startAIConversation()">💬 AIとおしゃべり（連続会話）</button>
     <button class="btn-check" onclick="startPointAndCall()">👉 外出・戸締まり指差呼称</button>
-    <button class="btn-alert" onclick="toggleFraudMonitor()" id="fraud-btn">🛡️ 詐欺対策マイク：OFF</button>
+    <button class="btn-alert" onclick="toggleRecording()" id="record-btn">🎙️ 防犯・会話の録音を開始</button>
+
+    <!-- 録音ファイルの再生エリア -->
+    <div id="audio-player-container">
+      <span style="font-size: 13px; font-weight: bold; color: #e65100;">📁 直近の録音データ</span>
+      <audio id="audio-player" controls></audio>
+      <a id="download-link" style="font-size: 12px; color: #0288d1; margin-top: 5px;" download="rec_security.webM">録音データをスマホに保存</a>
+    </div>
   </div>
 
   <!-- ログ表示 -->
@@ -129,24 +139,16 @@ HTML
     <div id="log-box">システム起動完了...<br></div>
   </div>
 
-  <!-- 詐欺警告 -->
-  <div id="alert-modal" class="alert-overlay">
-    <h1 style="color:white; font-size:32px;">⚠️ 危険！詐欺の疑い</h1>
-    <p style="font-size: 20px;">お金やカードの話はすぐに相談してください！</p>
-    <button class="btn-secondary" style="font-size: 22px; padding: 20px;" onclick="closeAlert()">電話を切りました・確認した</button>
-  </div>
-
   <script>
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition = null;
-    let isMonitoring = false;
     let isTalkingWithAI = false;
     let apiKey = localStorage.getItem('gemini_api_key') || '';
-    
-    // 会話履歴を保持する配列（文脈を維持するため）
     let chatHistory = [];
 
-    const FRAUD_KEYWORDS = ["還付金", "ATM", "キャッシュカード", "口座", "暗証番号", "名義貸し", "事故", "お金", "振込", "警察"];
+    // --- 録音機能用（MediaRecorder API） ---
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
 
     const SAFETY_CHECKS = [
       { text: "ガステーブルやストーブの火は消えましたか？", label: "🔥 火の不始末（消火確認）" },
@@ -160,7 +162,6 @@ HTML
       updateActivity();
       document.body.addEventListener('click', updateActivity);
       document.body.addEventListener('touchstart', updateActivity);
-      initSpeech();
 
       if (apiKey) {
         document.getElementById('api-key-input').value = apiKey;
@@ -201,53 +202,111 @@ HTML
       log(`[AI]: ${text}`);
     }
 
-    // --- Gemini API (最新モデル gemini-1.5-flash 対応) ---
+    // --- 防犯録音機能のコントロール ---
+    async function toggleRecording() {
+      updateActivity();
+      const btn = document.getElementById('record-btn');
+
+      if (!isRecording) {
+        try {
+          // マイクアクセスの取得
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            
+            // プレイヤーにセット
+            const audioPlayer = document.getElementById('audio-player');
+            const downloadLink = document.getElementById('download-link');
+            const container = document.getElementById('audio-player-container');
+            
+            audioPlayer.src = audioUrl;
+            downloadLink.href = audioUrl;
+            container.style.display = 'flex';
+
+            log("💾 録音データを保存しました。再生・保存が可能です。");
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+
+          btn.innerText = "⏹️ 録音中... (タップで停止)";
+          btn.className = "btn-recording";
+          speak("防犯録音を開始しました。会話を記録しています。");
+          log("🎙️ 会話の録音を開始しました...");
+
+        } catch (err) {
+          console.error("録音エラー:", err);
+          alert("マイクへのアクセスが拒否されたか、録音機能に対応していません。");
+        }
+      } else {
+        // 録音停止
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+          // マイクストリームを停止
+          mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        }
+        isRecording = false;
+
+        btn.innerText = "🎙️ 防犯・会話の録音を開始";
+        btn.className = "btn-alert";
+        speak("録音を停止しました。データを保存しました。");
+      }
+    }
+
+    // --- Gemini API (対話) ---
     async function askGemini(userText) {
       if (!apiKey) {
-        return "APIキーが設定されていないため、簡単なお返事のみとなります。声を聞かせてくれてありがとうございます！";
+        return "APIキーが設定されていません。画面上の設定をご確認ください。";
       }
 
       log("🤖 返答を考えています...");
-
-      // 会話履歴にユーザーの発言を追加
       chatHistory.push({ role: "user", parts: [{ text: userText }] });
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
-      const systemInstruction = "あなたは優しく温かい高齢者向け見守りAIです。相手を気遣い、親しみやすい言葉で2〜3文程度の短い返答をしてください。話が続くように優しく質問も交えてください。";
 
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: chatHistory,
-            systemInstruction: { parts: [{ text: systemInstruction }] }
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: "あなたは優しく温かい高齢者向け見守りAIです。相手を気遣い、親しみやすい言葉で2〜3文程度の短い返答をしてください。会話が続くように質問も交えてください。" }]
+              },
+              ...chatHistory
+            ]
           })
         });
 
         const data = await response.json();
-        
         if (data.candidates && data.candidates[0].content.parts[0].text) {
           const aiReply = data.candidates[0].content.parts[0].text;
-          // AIの返答も履歴に追加（文脈を維持する）
           chatHistory.push({ role: "model", parts: [{ text: aiReply }] });
           return aiReply;
         } else {
-          return "元気なお声が聞けて嬉しいです！今日も良い一日になりますように。";
+          return "元気なお声が聞けて嬉しいです！";
         }
       } catch (err) {
-        console.error("Gemini Error:", err);
-        return "通信がうまくいきませんでしたが、お声はしっかり届きましたよ！";
+        return "通信がうまくいきませんでしたが、お声は届いていますよ！";
       }
     }
 
-    // --- 連続AI会話ループ ---
+    // --- AI会話 ---
     function startAIConversation() {
       updateActivity();
       isTalkingWithAI = true;
-      chatHistory = []; // 会話履歴をリセット
-      
+      chatHistory = [];
       speak("おはようございます！今日も元気にお過ごしですか？何でもお話ししてくださいね。", () => {
         continueAILoop();
       });
@@ -255,30 +314,21 @@ HTML
 
     function continueAILoop() {
       if (!isTalkingWithAI) return;
-
       listenOnce(async (userText) => {
         if (!userText || userText === "（応答なし）") {
-          speak("少し静かになったのでおしゃべりを終えますね。またいつでも声をかけてください。");
+          speak("またいつでも声をかけてくださいね。");
           isTalkingWithAI = false;
           return;
         }
-
         log(`[ご本人]: ${userText}`);
-
-        // 会話を終了したいキーワードのチェック
         if (userText.includes("おしまい") || userText.includes("バイバイ") || userText.includes("ありがとう")) {
-          speak("お話しできて楽しかったです！またいつでも話しかけてくださいね。");
+          speak("お話しできて楽しかったです！またね！");
           isTalkingWithAI = false;
           return;
         }
-
-        // Geminiに聞き、返答を読み上げた後に「次の発話」を待つループを作る
         const aiReply = await askGemini(userText);
         speak(aiReply, () => {
-          // AIが話し終わったら自動的に次の声を聴き取る
-          setTimeout(() => {
-            continueAILoop();
-          }, 500);
+          setTimeout(() => { continueAILoop(); }, 500);
         });
       });
     }
@@ -308,81 +358,14 @@ HTML
       }
     }
 
-    // --- 単発マイク認識 ---
     function listenOnce(callback) {
-      if (!SpeechRecognition) {
-        alert("お使いのブラウザは音声認識に対応していません。ChromeまたはSafariをお使いください。");
-        return;
-      }
+      if (!SpeechRecognition) return;
       const rec = new SpeechRecognition();
       rec.lang = 'ja-JP';
       rec.start();
-
-      rec.onresult = (e) => {
-        const text = e.results[0][0].transcript;
-        callback(text);
-      };
-
-      rec.onerror = (e) => {
-        console.log("Speech Rec Error:", e);
-        callback("（応答なし）");
-      };
-    }
-
-    // --- 詐欺監視 ---
-    function initSpeech() {
-      if (!SpeechRecognition) return;
-      recognition = new SpeechRecognition();
-      recognition.lang = 'ja-JP';
-      recognition.continuous = true;
-      recognition.interimResults = false;
-
-      recognition.onresult = (e) => {
-        updateActivity();
-        const latest = e.results[e.results.length - 1][0].transcript;
-        log(`[会話検知]: ${latest}`);
-
-        const detected = FRAUD_KEYWORDS.some(word => latest.includes(word));
-        if (detected) {
-          triggerFraudAlert();
-        }
-      };
-
-      recognition.onend = () => {
-        if (isMonitoring) recognition.start();
-      };
-    }
-
-    function toggleFraudMonitor() {
-      updateActivity();
-      isTalkingWithAI = false;
-      const btn = document.getElementById('fraud-btn');
-      if (!isMonitoring) {
-        isMonitoring = true;
-        recognition.start();
-        btn.innerText = "🛡️ 詐欺対策マイク：監視中 (ON)";
-        btn.style.background = "#2e7d32";
-        speak("詐欺電話の監視を開始しました。");
-      } else {
-        isMonitoring = false;
-        recognition.stop();
-        btn.innerText = "🛡️ 詐欺対策マイク：OFF";
-        btn.style.background = "#d32f2f";
-        log("詐欺監視を停止しました。");
-      }
-    }
-
-    function triggerFraudAlert() {
-      document.getElementById('alert-modal').style.display = 'flex';
-      speak("警告。詐欺の危険があります。すぐにお電話を切ってください！");
-    }
-
-    function closeAlert() {
-      document.getElementById('alert-modal').style.display = 'none';
-      window.speechSynthesis.cancel();
+      rec.onresult = (e) => { callback(e.results[0][0].transcript); };
+      rec.onerror = () => { callback("（応答なし）"); };
     }
   </script>
 </body>
 </html>
-
-   
