@@ -239,10 +239,10 @@ HTML
           return;
         }
         isTalkingWithAI = true;
-        chatHistory = []; // 新しい会話セッションを開始
+        chatHistory = [];
         btn.innerText = "🛑 おしゃべりを終了する";
         btn.style.background = "#d32f2f";
-        log("💬 会答セッションを開始しました");
+        log("💬 会話を開始しました");
 
         speak("こんにちは！今日はお話しできて嬉しいです。今日はどんな一日でしたか？", () => {
           continueAILoop();
@@ -264,12 +264,12 @@ HTML
     function continueAILoop() {
       if (!isTalkingWithAI) return;
 
-      log("👂 マイク準備中…お話しください");
+      log("👂 声を聞き取っています...");
       listenOnce(async (userText) => {
         if (!isTalkingWithAI) return;
 
         if (!userText || userText === "（聞き取れませんでした）") {
-          speak("すみません、よく聞き取れませんでした。もう一度短めにお話しいただけますか？", () => {
+          speak("うまく聞き取れませんでした。もう一度お話しいただけますか？", () => {
             if (isTalkingWithAI) setTimeout(continueAILoop, 1000);
           });
           return;
@@ -292,8 +292,14 @@ HTML
     }
 
     async function askGeminiChat(userText) {
-      // ユーザー発言をコンテキストに追加
-      chatHistory.push({ role: "user", parts: [{ text: userText }] });
+      // 過去の会話文脈を含めずプロンプト内で直接会話文脈を整形
+      const promptText = `あなたは高齢者のお話し相手となる親切な話し相手です。
+相手の発言: 「${userText}」
+
+指示:
+1. 相手の発言内容に必ず触れ、具体的に共感や相槌を返してください。
+2. 返答は2〜3文（60〜90文字程度）の自然な言葉遣いにしてください。
+3. 最後に相手が答えやすい質問を1つ含めてください。`;
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
@@ -302,31 +308,26 @@ HTML
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            systemInstruction: {
-              parts: [{
-                text: "あなたは高齢者のお話し相手となる親切な近所の話し相手です。" +
-                      "直前のユーザーの発言内容にしっかりと耳を傾け、相手の発言に含まれるキーワード（天気、ご飯、家族、健康など）に直接コメントしてください。" +
-                      "オウム返しや汎用的な挨拶だけで終わらせず、具体的に共感し、最後に相手が答えやすい簡単な質問を1つだけ投げかけてください。" +
-                      "文字数は60文字〜90文字程度で、短く分かりやすい日本語で話してください。"
-              }]
-            },
-            contents: chatHistory
+            contents: [{
+              role: "user",
+              parts: [{ text: promptText }]
+            }]
           })
         });
 
         const data = await response.json();
         
         if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0].text) {
-          const aiReply = data.candidates[0].content.parts[0].text;
-          chatHistory.push({ role: "model", parts: [{ text: aiReply }] });
-          return aiReply;
+          return data.candidates[0].content.parts[0].text;
         } else {
-          console.error("Gemini Error Response:", data);
-          return `「${userText}」とおっしゃったのですね。もう少し詳しく教えていただけますか？`;
+          // エラーレスポンスの内容を画面のログに出力
+          const errMsg = data.error ? data.error.message : JSON.stringify(data);
+          log(`⚠️ APIエラー: ${errMsg}`);
+          return "すみません、うまく処理できませんでした。もう一度試していただけますか？";
         }
       } catch (err) {
-        console.error("API Fetch Error:", err);
-        return "申し訳ありません。うまく通信できませんでした。もう一度お願いできますか？";
+        log(`⚠️ 通信エラー: ${err.message}`);
+        return "通信エラーが発生しました。ネットワーク接続とAPIキーを確認してください。";
       }
     }
 
@@ -341,7 +342,6 @@ HTML
       rec.interimResults = false;
       rec.maxAlternatives = 1;
 
-      // 認識タイムアウト防止
       let hasResponded = false;
 
       rec.onresult = (e) => {
@@ -354,7 +354,6 @@ HTML
       rec.onerror = (e) => {
         if (hasResponded) return;
         hasResponded = true;
-        console.log("Speech Rec Error:", e);
         callback("（聞き取れませんでした）");
       };
 
