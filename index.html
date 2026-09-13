@@ -228,7 +228,7 @@ HTML
       log(`[AI]: ${text}`);
     }
 
-    // --- 1. AIとおしゃべり機能（トグルON/OFF切り替え） ---
+    // --- 1. AIとおしゃべり機能（カウンセラー風プロンプト適用） ---
     function toggleAIConversation() {
       updateActivity();
       const btn = document.getElementById('chat-btn');
@@ -242,9 +242,9 @@ HTML
         chatHistory = [];
         btn.innerText = "🛑 おしゃべりを終了する";
         btn.style.background = "#d32f2f";
-        log("💬 会話をスタートしました...");
+        log("💬 会話をスタートしました（カウンセラーモード）...");
 
-        speak("こんにちは！今日はお話しできて嬉しいです。何かありましたか？", () => {
+        speak("こんにちは。今日も頑張っておられますね。何か心にかかっていることや、話したいことはありますか？", () => {
           continueAILoop();
         });
       } else {
@@ -256,9 +256,9 @@ HTML
       isTalkingWithAI = false;
       window.speechSynthesis.cancel();
       const btn = document.getElementById('chat-btn');
-      btn.innerText = "💬 AIとおしゃべ答を開始";
+      btn.innerText = "💬 AIとおしゃべりを開始";
       btn.style.background = "#2e7d32";
-      log("⏹️ 会話を終了しました。");
+      log("⏹️ 会答を終了しました。");
     }
 
     function continueAILoop() {
@@ -269,7 +269,7 @@ HTML
         if (!isTalkingWithAI) return;
 
         if (!userText || userText === "（聞き取れませんでした）") {
-          speak("声が聞き取れませんでした。もう一度話しかけてみてくださいね。", () => {
+          speak("声が少し届きにくかったようです。無理のない範囲でもう一度教えていただけますか？", () => {
             if (isTalkingWithAI) setTimeout(continueAILoop, 1000);
           });
           return;
@@ -277,8 +277,8 @@ HTML
 
         log(`[ご本人]: ${userText}`);
 
-        if (userText.includes("おしまい") || userText.includes("バイバイ") || userText.includes("終了")) {
-          speak("お話しできて楽しかったです！またね！", () => {
+        if (userText.includes("おしまい") || userText.includes("バイバイ") || userText.includes("終了") || userText.includes("ありがとう")) {
+          speak("お話しできて良かったです。いつでもお話を聞きますので、休んでくださいね。", () => {
             stopAIConversation();
           });
           return;
@@ -304,7 +304,9 @@ HTML
             contents: [
               {
                 role: "user",
-                parts: [{ text: "あなたは優しく温かい高齢者向け見守りAIです。相手を気遣い、親しみやすい日本語で2 sentence程度の短く分かりやすい返答をしてください。" }]
+                parts: [{ 
+                  text: "あなたはとても優しく思慮深い相談相手・カウンセラーです。相手の話に耳を傾け、肯定的に温かく受け止めてください。否定的な表現は一切使わず、共感と労いの言葉をかけ、専門用語は使わず分かりやすくやわらかい言葉遣いにしてください。1回の返答は2〜3文程度で短くまとめ、相手が話しやすいように優しい質問を1つ含めてください。" 
+                }]
               },
               ...chatHistory
             ]
@@ -317,11 +319,11 @@ HTML
           chatHistory.push({ role: "model", parts: [{ text: aiReply }] });
           return aiReply;
         } else {
-          return "元気なお声が聞けて嬉しいです！";
+          return "お気持ち、とてもよく伝わっていますよ。ゆっくり聞かせてくださいね。";
         }
       } catch (err) {
         console.error(err);
-        return "通信がうまくいきませんでしたが、声はしっかり届きましたよ！";
+        return "少し通信が不安定ですが、あなたのお話はしっかり聞いていますよ。";
       }
     }
 
