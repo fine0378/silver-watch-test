@@ -4,7 +4,7 @@ HTML
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>高齢者安心みまもりアプリ (Gemini API搭載)</title>
+  <title>高齢者安心みまもりアプリ</title>
   <style>
     :root {
       --primary: #2e7d32;
@@ -44,7 +44,7 @@ HTML
       margin-bottom: 10px;
     }
 
-    input[type="password"], input[type="text"] {
+    input[type="password"] {
       width: 80%;
       padding: 10px;
       font-size: 14px;
@@ -62,7 +62,6 @@ HTML
       border-radius: 12px;
       margin: 8px 0;
       cursor: pointer;
-      transition: background 0.2s;
     }
     .btn-main { background: var(--primary); color: white; }
     .btn-check { background: #0288d1; color: white; }
@@ -75,7 +74,7 @@ HTML
       border: 1px solid #ddd;
       border-radius: 8px;
       padding: 10px;
-      height: 140px;
+      height: 160px;
       overflow-y: auto;
       text-align: left;
       font-size: 14px;
@@ -96,18 +95,17 @@ HTML
       box-sizing: border-box;
       text-align: center;
     }
-    .alert-overlay h1 { color: white; font-size: 32px; }
   </style>
 </head>
 <body>
 
-  <!-- APIキー設定エリア -->
+  <!-- APIキー設定 -->
   <div class="card" style="background: #eef6ec;">
     <h1 style="font-size: 16px;">🔑 Gemini API 設定</h1>
     <input type="password" id="api-key-input" placeholder="Gemini API Keyを入力">
     <br>
     <button class="btn-main btn-small" onclick="saveApiKey()">保存する</button>
-    <p id="key-status" style="font-size: 12px; color: #666; margin: 4px 0 0 0;">キー未設定（固定セリフで動作中）</p>
+    <p id="key-status" style="font-size: 12px; color: #666; margin: 4px 0 0 0;">キー未設定</p>
   </div>
 
   <!-- メインダッシュボード -->
@@ -117,38 +115,39 @@ HTML
     <p id="last-active" style="font-size: 12px; color: #777;">最終アクティブ: 記録なし</p>
   </div>
 
-  <!-- 機能ボタンエリア -->
+  <!-- 機能ボタン -->
   <div class="card">
     <h2>本日のアクション</h2>
-    <button class="btn-main" onclick="startMorningCheck()">☀️ 朝の元気チェック (AI会話)</button>
+    <button class="btn-main" onclick="startAIConversation()">💬 AIとおしゃべり（連続会話）</button>
     <button class="btn-check" onclick="startPointAndCall()">👉 外出・戸締まり指差呼称</button>
     <button class="btn-alert" onclick="toggleFraudMonitor()" id="fraud-btn">🛡️ 詐欺対策マイク：OFF</button>
   </div>
 
-  <!-- 状態表示ログ -->
+  <!-- ログ表示 -->
   <div class="card">
-    <h2>状態・会話ログ</h2>
+    <h2>会話・状態ログ</h2>
     <div id="log-box">システム起動完了...<br></div>
   </div>
 
-  <!-- 詐欺警告ポップアップ -->
+  <!-- 詐欺警告 -->
   <div id="alert-modal" class="alert-overlay">
-    <h1>⚠️ 危険！詐欺の疑い</h1>
+    <h1 style="color:white; font-size:32px;">⚠️ 危険！詐欺の疑い</h1>
     <p style="font-size: 20px;">お金やカードの話はすぐに相談してください！</p>
     <button class="btn-secondary" style="font-size: 22px; padding: 20px;" onclick="closeAlert()">電話を切りました・確認した</button>
   </div>
 
   <script>
-    // --- 1. グローバル設定 & 状態管理 ---
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition = null;
     let isMonitoring = false;
+    let isTalkingWithAI = false;
     let apiKey = localStorage.getItem('gemini_api_key') || '';
+    
+    // 会話履歴を保持する配列（文脈を維持するため）
+    let chatHistory = [];
 
-    // 詐欺検知キーワード
-    const FRAUD_KEYWORDS = ["還付金", "ATM", "キャッシュカード", "口座", "暗証番号", "名義貸し", "事故", "お金", "振込", "警察", "未納"];
+    const FRAUD_KEYWORDS = ["還付金", "ATM", "キャッシュカード", "口座", "暗証番号", "名義貸し", "事故", "お金", "振込", "警察"];
 
-    // 指差呼称リスト
     const SAFETY_CHECKS = [
       { text: "ガステーブルやストーブの火は消えましたか？", label: "🔥 火の不始末（消火確認）" },
       { text: "玄関や窓のカギは締めましたか？", label: "🔑 戸締まり（鍵確認）" },
@@ -157,7 +156,6 @@ HTML
     ];
     let checkStep = 0;
 
-    // --- 2. 初期化 & APIキー管理 ---
     window.onload = () => {
       updateActivity();
       document.body.addEventListener('click', updateActivity);
@@ -166,7 +164,7 @@ HTML
 
       if (apiKey) {
         document.getElementById('api-key-input').value = apiKey;
-        document.getElementById('key-status').innerText = "✅ APIキー設定済み (AI会話有効)";
+        document.getElementById('key-status').innerText = "✅ APIキー設定済み";
       }
     };
 
@@ -175,7 +173,7 @@ HTML
       if (input) {
         apiKey = input;
         localStorage.setItem('gemini_api_key', apiKey);
-        document.getElementById('key-status').innerText = "✅ APIキー設定済み (AI会話有効)";
+        document.getElementById('key-status').innerText = "✅ APIキー設定済み";
         alert("APIキーを保存しました！");
       }
     }
@@ -203,62 +201,92 @@ HTML
       log(`[AI]: ${text}`);
     }
 
-    // --- 3. Gemini API 呼び出し処理 ---
+    // --- Gemini API (最新モデル gemini-1.5-flash 対応) ---
     async function askGemini(userText) {
       if (!apiKey) {
-        return "声を聴けて安心しました！今日も良い一日をお過ごしくださいね。";
+        return "APIキーが設定されていないため、簡単なお返事のみとなります。声を聞かせてくれてありがとうございます！";
       }
 
-      log("🤖 Gemini AIが返答を考え中...");
-      
-      // 高齢者向けに優しく短く答える指示（システムプロンプト）
-      const prompt = `あなたは優しく温かいシニア向けの見守りAIアシスタントです。
-高齢者のユーザーが「${userText}」と言いました。
-相手を思いやり、安心感を与える短めの返答（2〜3文程度）を日本語で作成してください。`;
+      log("🤖 返答を考えています...");
+
+      // 会話履歴にユーザーの発言を追加
+      chatHistory.push({ role: "user", parts: [{ text: userText }] });
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+      const systemInstruction = "あなたは優しく温かい高齢者向け見守りAIです。相手を気遣い、親しみやすい言葉で2〜3文程度の短い返答をしてください。話が続くように優しく質問も交えてください。";
 
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
+            contents: chatHistory,
+            systemInstruction: { parts: [{ text: systemInstruction }] }
           })
         });
 
         const data = await response.json();
+        
         if (data.candidates && data.candidates[0].content.parts[0].text) {
-          return data.candidates[0].content.parts[0].text;
+          const aiReply = data.candidates[0].content.parts[0].text;
+          // AIの返答も履歴に追加（文脈を維持する）
+          chatHistory.push({ role: "model", parts: [{ text: aiReply }] });
+          return aiReply;
         } else {
-          return "お返事をありがとうございます。元気なお声が聞けて嬉しいです！";
+          return "元気なお声が聞けて嬉しいです！今日も良い一日になりますように。";
         }
       } catch (err) {
-        console.error(err);
-        return "通信エラーが発生しましたが、お元気そうで安心しました！";
+        console.error("Gemini Error:", err);
+        return "通信がうまくいきませんでしたが、お声はしっかり届きましたよ！";
       }
     }
 
-    // --- 4. 朝の元気チェック（Gemini連動） ---
-    function startMorningCheck() {
+    // --- 連続AI会話ループ ---
+    function startAIConversation() {
       updateActivity();
-      speak("おはようございます！今日も元気にお過ごしですか？お話を聞かせてくださいね。", () => {
-        listenOnce(async (result) => {
-          log(`[ご本人]: ${result}`);
-          if (result && result !== "（応答なし）") {
-            // Gemini APIでAI返答を生成
-            const reply = await askGemini(result);
-            speak(reply);
-          } else {
-            speak("応答が確認できませんでした。またあとで声をかけてくださいね。");
-          }
+      isTalkingWithAI = true;
+      chatHistory = []; // 会話履歴をリセット
+      
+      speak("おはようございます！今日も元気にお過ごしですか？何でもお話ししてくださいね。", () => {
+        continueAILoop();
+      });
+    }
+
+    function continueAILoop() {
+      if (!isTalkingWithAI) return;
+
+      listenOnce(async (userText) => {
+        if (!userText || userText === "（応答なし）") {
+          speak("少し静かになったのでおしゃべりを終えますね。またいつでも声をかけてください。");
+          isTalkingWithAI = false;
+          return;
+        }
+
+        log(`[ご本人]: ${userText}`);
+
+        // 会話を終了したいキーワードのチェック
+        if (userText.includes("おしまい") || userText.includes("バイバイ") || userText.includes("ありがとう")) {
+          speak("お話しできて楽しかったです！またいつでも話しかけてくださいね。");
+          isTalkingWithAI = false;
+          return;
+        }
+
+        // Geminiに聞き、返答を読み上げた後に「次の発話」を待つループを作る
+        const aiReply = await askGemini(userText);
+        speak(aiReply, () => {
+          // AIが話し終わったら自動的に次の声を聴き取る
+          setTimeout(() => {
+            continueAILoop();
+          }, 500);
         });
       });
     }
 
-    // --- 5. 指差呼称機能 ---
+    // --- 指差呼称 ---
     function startPointAndCall() {
       updateActivity();
+      isTalkingWithAI = false;
       checkStep = 0;
       runSafetyCheckStep();
     }
@@ -280,25 +308,28 @@ HTML
       }
     }
 
-    // 単発音声認識ヘパー
+    // --- 単発マイク認識 ---
     function listenOnce(callback) {
       if (!SpeechRecognition) {
-        alert("お使いのブラウザは音声認識に対応していません。");
+        alert("お使いのブラウザは音声認識に対応していません。ChromeまたはSafariをお使いください。");
         return;
       }
       const rec = new SpeechRecognition();
       rec.lang = 'ja-JP';
       rec.start();
+
       rec.onresult = (e) => {
         const text = e.results[0][0].transcript;
         callback(text);
       };
-      rec.onerror = () => {
+
+      rec.onerror = (e) => {
+        console.log("Speech Rec Error:", e);
         callback("（応答なし）");
       };
     }
 
-    // --- 6. 詐欺会話のリアルタイム監視 ---
+    // --- 詐欺監視 ---
     function initSpeech() {
       if (!SpeechRecognition) return;
       recognition = new SpeechRecognition();
@@ -324,6 +355,7 @@ HTML
 
     function toggleFraudMonitor() {
       updateActivity();
+      isTalkingWithAI = false;
       const btn = document.getElementById('fraud-btn');
       if (!isMonitoring) {
         isMonitoring = true;
@@ -343,7 +375,6 @@ HTML
     function triggerFraudAlert() {
       document.getElementById('alert-modal').style.display = 'flex';
       speak("警告。詐欺の危険があります。すぐにお電話を切ってください！");
-      log("⚠️ 詐欺ワードを検知！アラートを発動しました。");
     }
 
     function closeAlert() {
@@ -353,3 +384,5 @@ HTML
   </script>
 </body>
 </html>
+
+   
