@@ -163,7 +163,6 @@ HTML
   <script>
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let apiKey = localStorage.getItem('gemini_api_key') || '';
-    let chatHistory = [];
     let isTalkingWithAI = false;
 
     // 通話録音用変数
@@ -239,7 +238,6 @@ HTML
           return;
         }
         isTalkingWithAI = true;
-        chatHistory = [];
         btn.innerText = "🛑 おしゃべりを終了する";
         btn.style.background = "#d32f2f";
         log("💬 会話を開始しました");
@@ -292,7 +290,6 @@ HTML
     }
 
     async function askGeminiChat(userText) {
-      // 過去の会話文脈を含めずプロンプト内で直接会話文脈を整形
       const promptText = `あなたは高齢者のお話し相手となる親切な話し相手です。
 相手の発言: 「${userText}」
 
@@ -301,6 +298,7 @@ HTML
 2. 返答は2〜3文（60〜90文字程度）の自然な言葉遣いにしてください。
 3. 最後に相手が答えやすい質問を1つ含めてください。`;
 
+      // gemini-1.5-flash または gemini-2.0-flash を使用
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
       try {
@@ -309,7 +307,6 @@ HTML
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{
-              role: "user",
               parts: [{ text: promptText }]
             }]
           })
@@ -317,17 +314,16 @@ HTML
 
         const data = await response.json();
         
-        if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0].text) {
+        if (response.ok && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
           return data.candidates[0].content.parts[0].text;
         } else {
-          // エラーレスポンスの内容を画面のログに出力
-          const errMsg = data.error ? data.error.message : JSON.stringify(data);
+          const errMsg = data.error?.message || `ステータスコード: ${response.status}`;
           log(`⚠️ APIエラー: ${errMsg}`);
-          return "すみません、うまく処理できませんでした。もう一度試していただけますか？";
+          return "すみません、うまく処理できませんでした。もう一度お話しいただけますか？";
         }
       } catch (err) {
         log(`⚠️ 通信エラー: ${err.message}`);
-        return "通信エラーが発生しました。ネットワーク接続とAPIキーを確認してください。";
+        return "通信エラーが発生しました。インターネット接続とAPIキーを確認してください。";
       }
     }
 
@@ -489,19 +485,20 @@ HTML
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: prompt }] }]
+            contents: [{ parts: [{ text: prompt }] }]
           })
         });
 
         const data = await response.json();
-        const rawText = data.candidates[0].content.parts[0].text;
         
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
-        } else {
-          return { isScam: false, reason: "会話の分析結果を正常に処理できませんでした。" };
+        if (response.ok && data.candidates && data.candidates[0]?.content?.parts[0]?.text) {
+          const rawText = data.candidates[0].content.parts[0].text;
+          const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+          }
         }
+        return { isScam: false, reason: "AIのレスポンス形式を読み取れませんでした。" };
       } catch (err) {
         console.error(err);
         return { isScam: false, reason: "通信エラーが発生したためAI分析を完了できませんでした。" };
