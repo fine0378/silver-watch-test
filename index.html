@@ -228,7 +228,7 @@ HTML
       log(`[AI]: ${text}`);
     }
 
-    // --- 1. AIとおしゃべり機能（対話履歴管理＆動的応答） ---
+    // --- 1. AIとおしゃべり機能 ---
     function toggleAIConversation() {
       updateActivity();
       const btn = document.getElementById('chat-btn');
@@ -239,7 +239,7 @@ HTML
           return;
         }
         isTalkingWithAI = true;
-        chatHistory = []; // 新しい会話をスタート
+        chatHistory = []; // 会話履歴をリセット
         btn.innerText = "🛑 おしゃべりを終了する";
         btn.style.background = "#d32f2f";
         log("💬 会話をスタートしました...");
@@ -292,18 +292,8 @@ HTML
     }
 
     async function askGeminiChat(userText) {
-      // ユーザーの発言を履歴に追加
+      // ユーザーの発言を会話履歴に追加
       chatHistory.push({ role: "user", parts: [{ text: userText }] });
-
-      const systemInstruction = {
-        role: "user",
-        parts: [{ 
-          text: "【設定】あなたは親切で温かい聴き上手のカウンセラーAIです。" +
-                "相手の発言内容（「" + userText + "」）をしっかり反映させて返答を作成してください。" +
-                "定型文や同じ言い回しを繰り返さず、相手の話に具体的に共感・反応してください。" +
-                "1回の返答は2〜3文の短く自然な言葉遣いにし、最後に話が広がる質問を1つ添えてください。"
-        }]
-      };
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
@@ -312,24 +302,31 @@ HTML
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            contents: [
-              systemInstruction,
-              ...chatHistory
-            ]
+            // システムプロンプトを独立した設定として送信
+            systemInstruction: {
+              parts: [{
+                text: "あなたは優しく丁寧な高齢者向け聞き上手AIアシスタントです。" +
+                      "ユーザーの発言内容にしっかり耳を傾け、話の内容に具体的に反応してください。" +
+                      "定型文を返さず、毎回新しく自然な相槌やコメントを2〜3文で作成し、最後に答えやすい質問を1つ含めてください。"
+              }]
+            },
+            contents: chatHistory
           })
         });
 
         const data = await response.json();
+        
         if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts[0].text) {
           const aiReply = data.candidates[0].content.parts[0].text;
-          // AIの返答を履歴に追加
+          // AIの返答を会話履歴に追加
           chatHistory.push({ role: "model", parts: [{ text: aiReply }] });
           return aiReply;
         } else {
-          return "なるほど、そうなんですね。詳しく教えていただけますか？";
+          console.error("API Response Error:", data);
+          return "なるほど、そうなんですね。もう少し詳しく教えていただけますか？";
         }
       } catch (err) {
-        console.error(err);
+        console.error("Fetch Error:", err);
         return "通信の影響でうまく聞き取れませんでしたが、もう一度お聞きしてもよろしいですか？";
       }
     }
@@ -363,7 +360,7 @@ HTML
       }
     }
 
-    // --- 2. 通話録音＆詐欺判定（無音動作） ---
+    // --- 2. 通話録音＆詐欺判定 ---
     async function toggleRecording() {
       updateActivity();
       stopAIConversation();
