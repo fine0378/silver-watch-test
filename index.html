@@ -1,4 +1,4 @@
-HTML
+TML
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -32,7 +32,7 @@ HTML
       text-align: center;
     }
     h1 { font-size: 20px; color: #333; margin-top: 0; }
-    h2 { font-size: 18px; color: var(--primary); }
+    h2 { font-size: 18px; color: var(--primary); margin-bottom: 10px; }
     
     .status-badge {
       display: inline-block;
@@ -67,7 +67,6 @@ HTML
     .btn-check { background: #0288d1; color: white; }
     .btn-alert { background: var(--warning); color: white; }
     .btn-recording { background: #ff9800; color: white; animation: pulse 1.5s infinite; }
-    .btn-secondary { background: #e0e0e0; color: #333; }
     .btn-small { padding: 8px; font-size: 14px; width: 40%; margin-top: 0; }
 
     @keyframes pulse {
@@ -81,11 +80,12 @@ HTML
       border: 1px solid #ddd;
       border-radius: 8px;
       padding: 10px;
-      height: 140px;
+      height: 160px;
       overflow-y: auto;
       text-align: left;
       font-size: 14px;
-      color: #555;
+      color: #333;
+      white-space: pre-wrap;
     }
 
     #audio-player-container {
@@ -98,6 +98,19 @@ HTML
       border-radius: 8px;
     }
     audio { width: 100%; margin-top: 5px; }
+
+    /* AI分析結果の装飾 */
+    .result-box {
+      margin-top: 10px;
+      padding: 12px;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 15px;
+      display: none;
+      text-align: left;
+    }
+    .result-safe { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+    .result-danger { background: #ffebee; color: #c62828; border: 2px solid #ef5350; }
   </style>
 </head>
 <body>
@@ -110,262 +123,3 @@ HTML
     <button class="btn-main btn-small" onclick="saveApiKey()">保存する</button>
     <p id="key-status" style="font-size: 12px; color: #666; margin: 4px 0 0 0;">キー未設定</p>
   </div>
-
-  <!-- メインダッシュボード -->
-  <div class="card">
-    <h1>高齢者あんしん見守り</h1>
-    <div id="status" class="status-badge">💚 見守り作動中</div>
-    <p id="last-active" style="font-size: 12px; color: #777;">最終アクティブ: 記録なし</p>
-  </div>
-
-  <!-- 機能ボタン -->
-  <div class="card">
-    <h2>本日のアクション</h2>
-    <button class="btn-main" onclick="startAIConversation()">💬 AIとおしゃべり（連続会話）</button>
-    <button class="btn-check" onclick="startPointAndCall()">👉 外出・戸締まり指差呼称</button>
-    <button class="btn-alert" onclick="toggleRecording()" id="record-btn">🎙️ 防犯・会話の録音を開始</button>
-
-    <!-- 録音ファイルの再生エリア -->
-    <div id="audio-player-container">
-      <span style="font-size: 13px; font-weight: bold; color: #e65100;">📁 直近の録音データ</span>
-      <audio id="audio-player" controls></audio>
-      <a id="download-link" style="font-size: 12px; color: #0288d1; margin-top: 5px;" download="rec_security.webM">録音データをスマホに保存</a>
-    </div>
-  </div>
-
-  <!-- ログ表示 -->
-  <div class="card">
-    <h2>会話・状態ログ</h2>
-    <div id="log-box">システム起動完了...<br></div>
-  </div>
-
-  <script>
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let isTalkingWithAI = false;
-    let apiKey = localStorage.getItem('gemini_api_key') || '';
-    let chatHistory = [];
-
-    // --- 録音機能用（MediaRecorder API） ---
-    let mediaRecorder = null;
-    let audioChunks = [];
-    let isRecording = false;
-
-    const SAFETY_CHECKS = [
-      { text: "ガステーブルやストーブの火は消えましたか？", label: "🔥 火の不始末（消火確認）" },
-      { text: "玄関や窓のカギは締めましたか？", label: "🔑 戸締まり（鍵確認）" },
-      { text: "電気やコンセントは消しましたか？", label: "💡 電気・家電確認" },
-      { text: "スマホと財布は持ちましたか？", label: "📱 所持品確認" }
-    ];
-    let checkStep = 0;
-
-    window.onload = () => {
-      updateActivity();
-      document.body.addEventListener('click', updateActivity);
-      document.body.addEventListener('touchstart', updateActivity);
-
-      if (apiKey) {
-        document.getElementById('api-key-input').value = apiKey;
-        document.getElementById('key-status').innerText = "✅ APIキー設定済み";
-      }
-    };
-
-    function saveApiKey() {
-      const input = document.getElementById('api-key-input').value.trim();
-      if (input) {
-        apiKey = input;
-        localStorage.setItem('gemini_api_key', apiKey);
-        document.getElementById('key-status').innerText = "✅ APIキー設定済み";
-        alert("APIキーを保存しました！");
-      }
-    }
-
-    function updateActivity() {
-      const now = new Date();
-      const timeString = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-      localStorage.setItem('lastActiveTime', now.toISOString());
-      document.getElementById('last-active').innerText = `最終アクティブ: 本日 ${timeString}`;
-    }
-
-    function log(msg) {
-      const logBox = document.getElementById('log-box');
-      logBox.innerHTML += `• ${msg}<br>`;
-      logBox.scrollTop = logBox.scrollHeight;
-    }
-
-    function speak(text, callback) {
-      window.speechSynthesis.cancel();
-      const uttr = new SpeechSynthesisUtterance(text);
-      uttr.lang = 'ja-JP';
-      uttr.rate = 0.9;
-      uttr.onend = () => { if (callback) callback(); };
-      window.speechSynthesis.speak(uttr);
-      log(`[AI]: ${text}`);
-    }
-
-    // --- 防犯録音機能のコントロール ---
-    async function toggleRecording() {
-      updateActivity();
-      const btn = document.getElementById('record-btn');
-
-      if (!isRecording) {
-        try {
-          // マイクアクセスの取得
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          mediaRecorder = new MediaRecorder(stream);
-          audioChunks = [];
-
-          mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-              audioChunks.push(event.data);
-            }
-          };
-
-          mediaRecorder.onstop = () => {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-            const audioUrl = URL.createObjectURL(audioBlob);
-            
-            // プレイヤーにセット
-            const audioPlayer = document.getElementById('audio-player');
-            const downloadLink = document.getElementById('download-link');
-            const container = document.getElementById('audio-player-container');
-            
-            audioPlayer.src = audioUrl;
-            downloadLink.href = audioUrl;
-            container.style.display = 'flex';
-
-            log("💾 録音データを保存しました。再生・保存が可能です。");
-          };
-
-          mediaRecorder.start();
-          isRecording = true;
-
-          btn.innerText = "⏹️ 録音中... (タップで停止)";
-          btn.className = "btn-recording";
-          speak("防犯録音を開始しました。会話を記録しています。");
-          log("🎙️ 会話の録音を開始しました...");
-
-        } catch (err) {
-          console.error("録音エラー:", err);
-          alert("マイクへのアクセスが拒否されたか、録音機能に対応していません。");
-        }
-      } else {
-        // 録音停止
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-          // マイクストリームを停止
-          mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        }
-        isRecording = false;
-
-        btn.innerText = "🎙️ 防犯・会話の録音を開始";
-        btn.className = "btn-alert";
-        speak("録音を停止しました。データを保存しました。");
-      }
-    }
-
-    // --- Gemini API (対話) ---
-    async function askGemini(userText) {
-      if (!apiKey) {
-        return "APIキーが設定されていません。画面上の設定をご確認ください。";
-      }
-
-      log("🤖 返答を考えています...");
-      chatHistory.push({ role: "user", parts: [{ text: userText }] });
-
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              {
-                role: "user",
-                parts: [{ text: "あなたは優しく温かい高齢者向け見守りAIです。相手を気遣い、親しみやすい言葉で2〜3文程度の短い返答をしてください。会話が続くように質問も交えてください。" }]
-              },
-              ...chatHistory
-            ]
-          })
-        });
-
-        const data = await response.json();
-        if (data.candidates && data.candidates[0].content.parts[0].text) {
-          const aiReply = data.candidates[0].content.parts[0].text;
-          chatHistory.push({ role: "model", parts: [{ text: aiReply }] });
-          return aiReply;
-        } else {
-          return "元気なお声が聞けて嬉しいです！";
-        }
-      } catch (err) {
-        return "通信がうまくいきませんでしたが、お声は届いていますよ！";
-      }
-    }
-
-    // --- AI会話 ---
-    function startAIConversation() {
-      updateActivity();
-      isTalkingWithAI = true;
-      chatHistory = [];
-      speak("おはようございます！今日も元気にお過ごしですか？何でもお話ししてくださいね。", () => {
-        continueAILoop();
-      });
-    }
-
-    function continueAILoop() {
-      if (!isTalkingWithAI) return;
-      listenOnce(async (userText) => {
-        if (!userText || userText === "（応答なし）") {
-          speak("またいつでも声をかけてくださいね。");
-          isTalkingWithAI = false;
-          return;
-        }
-        log(`[ご本人]: ${userText}`);
-        if (userText.includes("おしまい") || userText.includes("バイバイ") || userText.includes("ありがとう")) {
-          speak("お話しできて楽しかったです！またね！");
-          isTalkingWithAI = false;
-          return;
-        }
-        const aiReply = await askGemini(userText);
-        speak(aiReply, () => {
-          setTimeout(() => { continueAILoop(); }, 500);
-        });
-      });
-    }
-
-    // --- 指差呼称 ---
-    function startPointAndCall() {
-      updateActivity();
-      isTalkingWithAI = false;
-      checkStep = 0;
-      runSafetyCheckStep();
-    }
-
-    function runSafetyCheckStep() {
-      if (checkStep < SAFETY_CHECKS.length) {
-        const current = SAFETY_CHECKS[checkStep];
-        log(`【指差呼称】${current.label}`);
-        speak(`${current.text} 指差し確認をして『よし』とお答えください。`, () => {
-          listenOnce((result) => {
-            log(`[ご本人]: ${result}`);
-            checkStep++;
-            runSafetyCheckStep();
-          });
-        });
-      } else {
-        speak("全ての確認が完了しました。安心してお出かけください！");
-        log("✅ 戸締まり・火の元チェック完了");
-      }
-    }
-
-    function listenOnce(callback) {
-      if (!SpeechRecognition) return;
-      const rec = new SpeechRecognition();
-      rec.lang = 'ja-JP';
-      rec.start();
-      rec.onresult = (e) => { callback(e.results[0][0].transcript); };
-      rec.onerror = () => { callback("（応答なし）"); };
-    }
-  </script>
-</body>
-</html>
