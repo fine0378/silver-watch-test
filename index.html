@@ -132,8 +132,10 @@ HTML
 
   <!-- 機能ボタン -->
   <div class="card">
-    <h2>防犯・記録機能</h2>
-    <button class="btn-alert" onclick="toggleRecording()" id="record-btn">🚨 通話の録音＆詐欺判定を開始</button>
+    <h2>コミュニケーション＆防犯</h2>
+    <button class="btn-main" onclick="startAIConversation()">💬 AIとおしゃべり（音声応答あり）</button>
+    
+    <button class="btn-alert" onclick="toggleRecording()" id="record-btn" style="margin-top: 15px;">🚨 通話の録音＆詐欺判定（音声なし）</button>
 
     <!-- 詐欺判定結果の表示 -->
     <div id="analysis-result" class="result-box"></div>
@@ -146,10 +148,10 @@ HTML
     </div>
   </div>
 
-  <!-- 指差呼称（テキストのみ） -->
+  <!-- 指差呼称（音声ガイダンスあり） -->
   <div class="card">
     <h2>チェック機能</h2>
-    <button class="btn-check" onclick="startPointAndCall()">👉 戸締まり・指差確認ログ作成</button>
+    <button class="btn-check" onclick="startPointAndCall()">👉 戸締まり・指差確認</button>
   </div>
 
   <!-- ログ表示 -->
@@ -161,13 +163,24 @@ HTML
   <script>
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let apiKey = localStorage.getItem('gemini_api_key') || '';
+    let chatHistory = [];
+    let isTalkingWithAI = false;
 
+    // 通話録音用変数
     let recognition = null;
     let transcribedText = "";
-
     let mediaRecorder = null;
     let audioChunks = [];
     let isRecording = false;
+
+    // 指差確認項目
+    const SAFETY_CHECKS = [
+      { text: "ガステーブルやストーブの火は消えましたか？", label: "🔥 火の不始末（消火確認）" },
+      { text: "玄関や窓のカギは締めましたか？", label: "🔑 戸締まり（鍵確認）" },
+      { text: "電気やコンセントは消しましたか？", label: "💡 電気・家電確認" },
+      { text: "スマホと財布は持ちましたか？", label: "📱 所持品確認" }
+    ];
+    let checkStep = 0;
 
     window.onload = () => {
       updateActivity();
@@ -203,8 +216,94 @@ HTML
       logBox.scrollTop = logBox.scrollHeight;
     }
 
+    // --- 音声読み上げ機能（おしゃべり・指差確認用） ---
+    function speak(text, callback) {
+      window.speechSynthesis.cancel();
+      const uttr = new SpeechSynthesisUtterance(text);
+      uttr.lang = 'ja-JP';
+      uttr.rate = 0.9;
+      uttr.onend = () => { if (callback) callback(); };
+      window.speechSynthesis.speak(uttr);
+      log(`[AI]: ${text}`);
+    }
+
+    // --- 1. AIとおしゃべり機能（連続対話・音声あり） ---
+    function startAIConversation() {
+      updateActivity();
+      isTalkingWithAI = true;
+      chatHistory = [];
+      speak("こんにちは！今日はお話ができて嬉しいです。何かありましたか？", () => {
+        continueAILoop();
+      });
+    }
+
+    function continueAILoop() {
+      if (!isTalkingWithAI) return;
+      listenOnce(async (userText) => {
+        if (!userText || userText === "（応答なし）") {
+          speak("少し静かになったのでおしゃべりを終えますね。またいつでも声をかけてください。");
+          isTalkingWithAI = false;
+          return;
+        }
+
+        log(`[ご本人]: ${userText}`);
+
+        if (userText.includes("おしまい") || userText.includes("バイバイ") || userText.includes("ありがとう")) {
+          speak("お話しできて楽しかったです！またね！");
+          isTalkingWithAI = false;
+          return;
+        }
+
+        const aiReply = await askGeminiChat(userText);
+        speak(aiReply, () => {
+          setTimeout(() => { continueAILoop(); }, 500);
+        });
+      });
+    }
+
+    async function askGeminiChat(userText) {
+      if (!apiKey) {
+        return "APIキーが設定されていません。設定を入力してくださいね。";
+      }
+
+      chatHistory.push({ role: "user", parts: [{ text: userText }] });
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: "あなたは優しく温かい高齢者向け見守りAIです。相手を気遣い、親しみやすい言葉で2〜3文程度の短い返答をしてください。会話が続くように質問も交えてください。" }]
+              },
+              ...chatHistory
+            ]
+          })
+        });
+
+        const data = await response.json();
+        if (data.candidates && data.candidates[0].content.parts[0].text) {
+          const aiReply = data.candidates[0].content.parts[0].text;
+          chatHistory.push({ role: "model", parts: [{ text: aiReply }] });
+          return aiReply;
+        } else {
+          return "元気なお声が聞けて嬉しいです！";
+        }
+      } catch (err) {
+        return "通信がうまくいきませんでしたが、声は聞こえましたよ！";
+      }
+    }
+
+    // --- 2. 通話録音＆詐欺判定（完全無音・音声ガイダンスなし） ---
     async function toggleRecording() {
       updateActivity();
+      isTalkingWithAI = false; // おしゃべりモードを強制終了
+      window.speechSynthesis.cancel(); // 進行中の音声を即時停止
+
       const btn = document.getElementById('record-btn');
       const resultBox = document.getElementById('analysis-result');
 
@@ -244,7 +343,7 @@ HTML
                 if (event.results[i].isFinal) {
                   const text = event.results[i][0].transcript;
                   transcribedText += text + " ";
-                  log(`[聴き取り]: ${text}`);
+                  log(`[会話録音]: ${text}`);
                 }
               }
             };
@@ -255,7 +354,7 @@ HTML
           resultBox.style.display = 'none';
           btn.innerText = "⏹️ 録音完了＆AI分析する";
           btn.className = "btn-recording";
-          log("🚨 通話の録音とAI会話解析を開始しました...");
+          log("🚨 通話の録音を開始しました（無音動作中）...");
 
         } catch (err) {
           console.error(err);
@@ -264,7 +363,7 @@ HTML
 
       } else {
         isRecording = false;
-        btn.innerText = "🚨 通話の録音＆詐欺判定を開始";
+        btn.innerText = "🚨 通話の録音＆詐欺判定（音声なし）";
         btn.className = "btn-alert";
 
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -275,7 +374,7 @@ HTML
           recognition.stop();
         }
 
-        log("⏹️ 録音終了。Gemini AIで詐欺判定を行います...");
+        log("⏹️ 録音終了。Gemini AIで詐欺判定を開始します...");
 
         resultBox.style.display = 'block';
         resultBox.className = 'result-box result-safe';
@@ -283,7 +382,7 @@ HTML
 
         setTimeout(async () => {
           if (!transcribedText.trim()) {
-            resultBox.innerText = "⚠️ 会話の音声が読み取れませんでした（録音データは保存されています）";
+            resultBox.innerText = "⚠️ 会話の音声が読み取れませんでした（録音ファイルは保存されています）";
             return;
           }
 
@@ -341,15 +440,38 @@ HTML
       }
     }
 
+    // --- 3. 指差呼称（音声アシスト付き） ---
     function startPointAndCall() {
       updateActivity();
-      log("--- 戸締まり・指差確認チェックリスト ---");
-      log("1. 🔥 ガステーブル・ストーブの消火確認");
-      log("2. 🔑 玄関・窓の鍵締め確認");
-      log("3. 💡 電源・家電の確認");
-      log("4. 📱 スマホ・財布の所持確認");
-      log("✅ 本日の確認ログを記録しました。");
-      alert("戸締まり・指差確認の記録をログに記載しました！");
+      isTalkingWithAI = false;
+      checkStep = 0;
+      runSafetyCheckStep();
+    }
+
+    function runSafetyCheckStep() {
+      if (checkStep < SAFETY_CHECKS.length) {
+        const current = SAFETY_CHECKS[checkStep];
+        log(`【指差呼称】${current.label}`);
+        speak(`${current.text} 確認して『よし』とお答えください。`, () => {
+          listenOnce((result) => {
+            log(`[ご本人]: ${result}`);
+            checkStep++;
+            runSafetyCheckStep();
+          });
+        });
+      } else {
+        speak("全ての確認が完了しました。安心してお出かけください！");
+        log("✅ 戸締まり・火の元チェック完了");
+      }
+    }
+
+    function listenOnce(callback) {
+      if (!SpeechRecognition) return;
+      const rec = new SpeechRecognition();
+      rec.lang = 'ja-JP';
+      rec.start();
+      rec.onresult = (e) => { callback(e.results[0][0].transcript); };
+      rec.onerror = () => { callback("（応答なし）"); };
     }
   </script>
 </body>
